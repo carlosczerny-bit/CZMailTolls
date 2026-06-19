@@ -246,7 +246,7 @@ export default function VideoSplitter() {
           <div style={{ fontSize: '11px', color: '#64748b' }}>Dividí tu video en partes de 60 seg para Instagram</div>
         </div>
         <div style={{ marginLeft: 'auto', fontSize: '10px', color: '#1e3a5f', fontFamily: 'monospace' }}>
-          build {__APP_BUILD__}
+          {__APP_VERSION__}
         </div>
       </div>
 
