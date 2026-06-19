@@ -65,6 +65,7 @@ export default function VideoSplitter() {
         '-map', '0',
         '-segment_time', String(SEGMENT_SECONDS),
         '-f', 'segment',
+        '-segment_format', 'mp4',
         '-reset_timestamps', '1',
         '-avoid_negative_ts', 'make_zero',
         'seg_%03d.mp4',
@@ -75,7 +76,7 @@ export default function VideoSplitter() {
         const name = `seg_${String(i).padStart(3, '0')}.mp4`;
         try {
           const data = await ffmpeg.readFile(name);
-          const blob = new Blob([data.buffer], { type: 'video/mp4' });
+          const blob = new Blob([data], { type: 'video/mp4' });
           results.push({
             index: i + 1,
             size: blob.size,
