@@ -2,7 +2,7 @@ import { useState, useRef } from 'react';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
 
-const FFMPEG_CORE_URL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
+const FFMPEG_CORE_URL = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/esm';
 const SEGMENT_SECONDS = 60;
 
 function formatSize(bytes) {
@@ -146,6 +146,9 @@ export default function VideoSplitter() {
         <div>
           <div style={{ fontWeight: '700', fontSize: '15px', color: '#f1f5f9' }}>CZ Splitter</div>
           <div style={{ fontSize: '11px', color: '#64748b' }}>Dividí tu video en partes de 60 seg para Instagram</div>
+        </div>
+        <div style={{ marginLeft: 'auto', fontSize: '10px', color: '#1e3a5f', fontFamily: 'monospace' }}>
+          build {__APP_BUILD__}
         </div>
       </div>
 
