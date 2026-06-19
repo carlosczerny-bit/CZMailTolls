@@ -106,11 +106,12 @@ export default function VideoSplitter() {
 
         const data = await ffmpeg.readFile(outName);
         const blob = new Blob([data], { type: 'video/mp4' });
+        const baseName = file.name.replace(/\.[^/.]+$/, '');
         results.push({
           index: segNum,
           size: blob.size,
           url: URL.createObjectURL(blob),
-          filename: `parte_${String(segNum).padStart(2, '0')}.mp4`,
+          filename: `${baseName}_parte_${String(segNum).padStart(2, '0')}.mp4`,
         });
         await ffmpeg.deleteFile(outName);
       }
@@ -136,19 +137,6 @@ export default function VideoSplitter() {
     e.preventDefault();
     setDragging(false);
     processFile(e.dataTransfer.files?.[0]);
-  };
-
-  const downloadAll = () => {
-    segments.forEach((seg, i) => {
-      setTimeout(() => {
-        const a = document.createElement('a');
-        a.href = seg.url;
-        a.download = seg.filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-      }, i * 400);
-    });
   };
 
   const reset = () => {
@@ -294,14 +282,9 @@ export default function VideoSplitter() {
                   {fileName} · {formatSize(segments.reduce((a, s) => a + s.size, 0))} total
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                <button onClick={downloadAll} style={{ background: 'linear-gradient(135deg, #e1306c, #c13584)', border: 'none', color: 'white', cursor: 'pointer', fontSize: '13px', fontWeight: '600', padding: '8px 16px', borderRadius: '8px', whiteSpace: 'nowrap' }}>
-                  ↓ Descargar todos
-                </button>
-                <button onClick={reset} style={{ background: 'none', border: '1px solid #334155', color: '#64748b', cursor: 'pointer', fontSize: '12px', padding: '8px 14px', borderRadius: '8px' }}>
-                  ↺ Nuevo
-                </button>
-              </div>
+              <button onClick={reset} style={{ background: 'none', border: '1px solid #334155', color: '#64748b', cursor: 'pointer', fontSize: '12px', padding: '8px 14px', borderRadius: '8px', whiteSpace: 'nowrap' }}>
+                ↺ Nuevo video
+              </button>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
