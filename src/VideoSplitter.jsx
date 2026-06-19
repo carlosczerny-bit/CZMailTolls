@@ -136,7 +136,18 @@ export default function VideoSplitter() {
   const isProcessing = phase === 'loading' || phase === 'processing';
 
   return (
-    <div style={{ flex: 1, background: '#020817', fontFamily: "'Segoe UI', system-ui, sans-serif", color: '#e2e8f0' }}>
+    <div style={{ minHeight: '100vh', background: '#020817', fontFamily: "'Segoe UI', system-ui, sans-serif", color: '#e2e8f0' }}>
+      {/* Header */}
+      <div style={{ background: '#0f172a', borderBottom: '1px solid #1e293b', padding: '14px 20px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <div style={{ width: '36px', height: '36px', background: 'linear-gradient(135deg, #e1306c, #c13584)', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px' }}>
+          ✂️
+        </div>
+        <div>
+          <div style={{ fontWeight: '700', fontSize: '15px', color: '#f1f5f9' }}>CZ Splitter</div>
+          <div style={{ fontSize: '11px', color: '#64748b' }}>Dividí tu video en partes de 60 seg para Instagram</div>
+        </div>
+      </div>
+
       <div style={{ maxWidth: '600px', margin: '0 auto', padding: '24px 16px' }}>
 
         {/* Drop zone */}
