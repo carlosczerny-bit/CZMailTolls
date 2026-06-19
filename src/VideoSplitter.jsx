@@ -10,12 +10,21 @@ function formatSize(bytes) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
+function parseDuration(logs) {
+  for (const line of logs) {
+    const m = line.match(/Duration:\s*(\d+):(\d+):(\d+\.?\d*)/);
+    if (m) return parseInt(m[1]) * 3600 + parseInt(m[2]) * 60 + parseFloat(m[3]);
+  }
+  return 0;
+}
+
 export default function VideoSplitter() {
   const [phase, setPhase] = useState('idle');
   const [segments, setSegments] = useState([]);
   const [statusText, setStatusText] = useState('');
   const [fileName, setFileName] = useState('');
   const [fileSize, setFileSize] = useState(0);
+  const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [dragging, setDragging] = useState(false);
   const ffmpegRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -38,7 +47,7 @@ export default function VideoSplitter() {
   const processFile = async (file) => {
     if (!file) return;
     if (!file.type.startsWith('video/') && !file.name.match(/\.(mp4|mov|avi|mkv|webm|m4v|3gp)$/i)) {
-      alert('Por favor seleccioná un archivo de video (MP4, MOV, AVI, MKV, etc.)');
+      alert('Por favor seleccióná un archivo de video (MP4, MOV, AVI, MKV, etc.)');
       return;
     }
 
@@ -46,47 +55,63 @@ export default function VideoSplitter() {
     setSegments([]);
     setFileName(file.name);
     setFileSize(file.size);
+    setProgress({ current: 0, total: 0 });
     setPhase('loading');
 
     try {
       const ffmpeg = await getFFmpeg();
       setPhase('processing');
-      setStatusText('Cargando video en memoria...');
+      setStatusText('Cargando video...');
 
-      const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')).toLowerCase() : '.mp4';
+      const ext = file.name.includes('.')
+        ? file.name.slice(file.name.lastIndexOf('.')).toLowerCase()
+        : '.mp4';
       const inputName = `input${ext}`;
-
       await ffmpeg.writeFile(inputName, await fetchFile(file));
-      setStatusText('Dividiendo en segmentos de 60 segundos...');
 
-      await ffmpeg.exec([
-        '-i', inputName,
-        '-c', 'copy',
-        '-map', '0',
-        '-segment_time', String(SEGMENT_SECONDS),
-        '-f', 'segment',
-        '-segment_format', 'mp4',
-        '-reset_timestamps', '1',
-        '-avoid_negative_ts', 'make_zero',
-        'seg_%03d.mp4',
-      ]);
+      // Probe duration
+      setStatusText('Analizando duración del video...');
+      const probeLogs = [];
+      const captureLog = ({ message }) => probeLogs.push(message);
+      ffmpeg.on('log', captureLog);
+      await ffmpeg.exec(['-i', inputName]).catch(() => {});
+      ffmpeg.off('log', captureLog);
+
+      const videoDuration = parseDuration(probeLogs);
+      if (videoDuration === 0) {
+        throw new Error('No se pudo leer la duración. Verificá que sea un video válido.');
+      }
+
+      const numSegments = Math.ceil(videoDuration / SEGMENT_SECONDS);
+      setProgress({ current: 0, total: numSegments });
 
       const results = [];
-      for (let i = 0; ; i++) {
-        const name = `seg_${String(i).padStart(3, '0')}.mp4`;
-        try {
-          const data = await ffmpeg.readFile(name);
-          const blob = new Blob([data], { type: 'video/mp4' });
-          results.push({
-            index: i + 1,
-            size: blob.size,
-            url: URL.createObjectURL(blob),
-            filename: `parte_${String(i + 1).padStart(2, '0')}.mp4`,
-          });
-          await ffmpeg.deleteFile(name);
-        } catch {
-          break;
-        }
+      for (let i = 0; i < numSegments; i++) {
+        const segNum = i + 1;
+        setStatusText(`Cortando parte ${segNum} de ${numSegments}...`);
+        setProgress({ current: segNum, total: numSegments });
+
+        const start = i * SEGMENT_SECONDS;
+        const outName = `seg_${String(i).padStart(3, '0')}.mp4`;
+
+        await ffmpeg.exec([
+          '-ss', String(start),
+          '-i', inputName,
+          '-t', String(SEGMENT_SECONDS),
+          '-c', 'copy',
+          '-avoid_negative_ts', 'make_zero',
+          outName,
+        ]);
+
+        const data = await ffmpeg.readFile(outName);
+        const blob = new Blob([data], { type: 'video/mp4' });
+        results.push({
+          index: segNum,
+          size: blob.size,
+          url: URL.createObjectURL(blob),
+          filename: `parte_${String(segNum).padStart(2, '0')}.mp4`,
+        });
+        await ffmpeg.deleteFile(outName);
       }
 
       await ffmpeg.deleteFile(inputName);
@@ -131,10 +156,12 @@ export default function VideoSplitter() {
     setPhase('idle');
     setFileName('');
     setStatusText('');
+    setProgress({ current: 0, total: 0 });
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const isProcessing = phase === 'loading' || phase === 'processing';
+  const progressPct = progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : 0;
 
   return (
     <div style={{ minHeight: '100vh', background: '#020817', fontFamily: "'Segoe UI', system-ui, sans-serif", color: '#e2e8f0' }}>
@@ -172,58 +199,46 @@ export default function VideoSplitter() {
           >
             <div style={{ fontSize: '52px', marginBottom: '16px' }}>🎬</div>
             <div style={{ fontSize: '18px', fontWeight: '700', color: '#f1f5f9', marginBottom: '8px' }}>
-              Seleccioná tu video
+              Seleccióná tu video
             </div>
             <div style={{ fontSize: '14px', color: '#64748b', marginBottom: '24px', lineHeight: '1.6' }}>
               Arrastrá el archivo acá o tocá para seleccionar<br />
               <span style={{ fontSize: '12px', color: '#475569' }}>MP4, MOV, AVI, MKV, WebM...</span>
             </div>
-            <button
-              style={{
-                background: 'linear-gradient(135deg, #e1306c, #c13584)',
-                border: 'none',
-                color: 'white',
-                fontSize: '15px',
-                fontWeight: '600',
-                padding: '12px 28px',
-                borderRadius: '10px',
-                cursor: 'pointer',
-              }}
-            >
+            <button style={{ background: 'linear-gradient(135deg, #e1306c, #c13584)', border: 'none', color: 'white', fontSize: '15px', fontWeight: '600', padding: '12px 28px', borderRadius: '10px', cursor: 'pointer' }}>
               Elegir video
             </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="video/*"
-              onChange={handleFileChange}
-              style={{ display: 'none' }}
-            />
+            <input ref={fileInputRef} type="file" accept="video/*" onChange={handleFileChange} style={{ display: 'none' }} />
           </div>
         )}
 
         {isProcessing && (
-          <div style={{ textAlign: 'center', padding: '60px 24px', background: '#0f172a', borderRadius: '16px', border: '1px solid #1e293b' }}>
-            <div style={{ fontSize: '48px', marginBottom: '20px' }}>
+          <div style={{ textAlign: 'center', padding: '48px 24px', background: '#0f172a', borderRadius: '16px', border: '1px solid #1e293b' }}>
+            <div style={{ fontSize: '44px', marginBottom: '16px' }}>
               {phase === 'loading' ? '⏳' : '✂️'}
             </div>
-            <div style={{ fontSize: '16px', fontWeight: '600', color: '#f1f5f9', marginBottom: '12px' }}>
-              {phase === 'loading' ? 'Cargando motor de video...' : 'Dividiendo en segmentos...'}
+            <div style={{ fontSize: '16px', fontWeight: '600', color: '#f1f5f9', marginBottom: '8px' }}>
+              {phase === 'loading' ? 'Cargando motor de video...' : (
+                progress.total > 0
+                  ? `Cortando parte ${progress.current} de ${progress.total}...`
+                  : 'Procesando...'
+              )}
             </div>
-            <div style={{ fontSize: '12px', color: '#475569', marginBottom: '24px', minHeight: '18px', padding: '0 16px', wordBreak: 'break-all', lineHeight: '1.5' }}>
+            <div style={{ fontSize: '12px', color: '#475569', marginBottom: '20px', minHeight: '16px', padding: '0 16px', wordBreak: 'break-all', lineHeight: '1.5' }}>
               {statusText}
             </div>
-            <div style={{ background: '#1e293b', borderRadius: '999px', height: '5px', overflow: 'hidden', maxWidth: '280px', margin: '0 auto' }}>
-              <div style={{
-                height: '100%',
-                width: '35%',
-                background: 'linear-gradient(90deg, #e1306c, #c13584)',
-                borderRadius: '999px',
-                animation: 'slide 1.4s ease-in-out infinite',
-              }} />
+            <div style={{ background: '#1e293b', borderRadius: '999px', height: '6px', overflow: 'hidden', maxWidth: '300px', margin: '0 auto' }}>
+              {progress.total > 0 ? (
+                <div style={{ height: '100%', width: `${progressPct}%`, background: 'linear-gradient(90deg, #e1306c, #c13584)', borderRadius: '999px', transition: 'width 0.3s ease' }} />
+              ) : (
+                <div style={{ height: '100%', width: '35%', background: 'linear-gradient(90deg, #e1306c, #c13584)', borderRadius: '999px', animation: 'slide 1.4s ease-in-out infinite' }} />
+              )}
             </div>
+            {progress.total > 0 && (
+              <div style={{ marginTop: '8px', fontSize: '12px', color: '#334155' }}>{progressPct}%</div>
+            )}
             {fileName && (
-              <div style={{ marginTop: '20px', fontSize: '12px', color: '#334155' }}>
+              <div style={{ marginTop: '16px', fontSize: '12px', color: '#334155' }}>
                 {fileName} · {formatSize(fileSize)}
               </div>
             )}
@@ -234,16 +249,11 @@ export default function VideoSplitter() {
         {phase === 'error' && (
           <div style={{ textAlign: 'center', padding: '48px 24px', background: '#0f172a', borderRadius: '16px', border: '1px solid #450a0a' }}>
             <div style={{ fontSize: '44px', marginBottom: '16px' }}>❌</div>
-            <div style={{ fontSize: '16px', fontWeight: '700', color: '#fca5a5', marginBottom: '10px' }}>
-              Error al procesar
-            </div>
+            <div style={{ fontSize: '16px', fontWeight: '700', color: '#fca5a5', marginBottom: '10px' }}>Error al procesar</div>
             <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '24px', maxWidth: '380px', margin: '0 auto 24px', lineHeight: '1.6' }}>
               {statusText}
             </div>
-            <button
-              onClick={reset}
-              style={{ background: '#1e293b', border: '1px solid #334155', color: '#e2e8f0', cursor: 'pointer', fontSize: '13px', padding: '8px 20px', borderRadius: '8px' }}
-            >
+            <button onClick={reset} style={{ background: '#1e293b', border: '1px solid #334155', color: '#e2e8f0', cursor: 'pointer', fontSize: '13px', padding: '8px 20px', borderRadius: '8px' }}>
               Intentar de nuevo
             </button>
           </div>
@@ -251,18 +261,7 @@ export default function VideoSplitter() {
 
         {phase === 'done' && segments.length > 0 && (
           <div>
-            <div style={{
-              marginBottom: '16px',
-              padding: '16px 20px',
-              background: '#0f172a',
-              borderRadius: '12px',
-              border: '1px solid #1e293b',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: '12px',
-              flexWrap: 'wrap',
-            }}>
+            <div style={{ marginBottom: '16px', padding: '16px 20px', background: '#0f172a', borderRadius: '12px', border: '1px solid #1e293b', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
               <div>
                 <div style={{ fontSize: '15px', fontWeight: '700', color: '#4ade80' }}>
                   ✅ {segments.length} {segments.length === 1 ? 'parte lista' : 'partes listas'}
@@ -272,88 +271,27 @@ export default function VideoSplitter() {
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                <button
-                  onClick={downloadAll}
-                  style={{
-                    background: 'linear-gradient(135deg, #e1306c, #c13584)',
-                    border: 'none',
-                    color: 'white',
-                    cursor: 'pointer',
-                    fontSize: '13px',
-                    fontWeight: '600',
-                    padding: '8px 16px',
-                    borderRadius: '8px',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
+                <button onClick={downloadAll} style={{ background: 'linear-gradient(135deg, #e1306c, #c13584)', border: 'none', color: 'white', cursor: 'pointer', fontSize: '13px', fontWeight: '600', padding: '8px 16px', borderRadius: '8px', whiteSpace: 'nowrap' }}>
                   ↓ Descargar todos
                 </button>
-                <button
-                  onClick={reset}
-                  style={{ background: 'none', border: '1px solid #334155', color: '#64748b', cursor: 'pointer', fontSize: '12px', padding: '8px 14px', borderRadius: '8px' }}
-                >
+                <button onClick={reset} style={{ background: 'none', border: '1px solid #334155', color: '#64748b', cursor: 'pointer', fontSize: '12px', padding: '8px 14px', borderRadius: '8px' }}>
                   ↺ Nuevo
                 </button>
               </div>
             </div>
-
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {segments.map(seg => (
-                <div
-                  key={seg.index}
-                  style={{
-                    background: '#0f172a',
-                    border: '1px solid #1e293b',
-                    borderRadius: '10px',
-                    padding: '14px 16px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: '12px',
-                  }}
-                >
+                <div key={seg.index} style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: '10px', padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <div style={{
-                      width: '38px',
-                      height: '38px',
-                      background: 'rgba(225,48,108,0.1)',
-                      border: '1px solid rgba(225,48,108,0.3)',
-                      borderRadius: '8px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: '14px',
-                      fontWeight: '700',
-                      color: '#e1306c',
-                      flexShrink: 0,
-                    }}>
+                    <div style={{ width: '38px', height: '38px', background: 'rgba(225,48,108,0.1)', border: '1px solid rgba(225,48,108,0.3)', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: '700', color: '#e1306c', flexShrink: 0 }}>
                       {seg.index}
                     </div>
                     <div>
-                      <div style={{ fontSize: '14px', fontWeight: '600', color: '#f1f5f9' }}>
-                        Parte {seg.index}
-                      </div>
-                      <div style={{ fontSize: '11px', color: '#475569' }}>
-                        {formatSize(seg.size)} · hasta 60 seg
-                      </div>
+                      <div style={{ fontSize: '14px', fontWeight: '600', color: '#f1f5f9' }}>Parte {seg.index}</div>
+                      <div style={{ fontSize: '11px', color: '#475569' }}>{formatSize(seg.size)} · hasta 60 seg</div>
                     </div>
                   </div>
-                  <a
-                    href={seg.url}
-                    download={seg.filename}
-                    style={{
-                      background: '#1e293b',
-                      border: '1px solid #334155',
-                      color: '#e2e8f0',
-                      textDecoration: 'none',
-                      fontSize: '12px',
-                      fontWeight: '500',
-                      padding: '7px 14px',
-                      borderRadius: '6px',
-                      whiteSpace: 'nowrap',
-                      display: 'inline-block',
-                    }}
-                  >
+                  <a href={seg.url} download={seg.filename} style={{ background: '#1e293b', border: '1px solid #334155', color: '#e2e8f0', textDecoration: 'none', fontSize: '12px', fontWeight: '500', padding: '7px 14px', borderRadius: '6px', whiteSpace: 'nowrap', display: 'inline-block' }}>
                     ↓ Descargar
                   </a>
                 </div>
